@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mini-coding-agent = "mini_coding_agent:main"
+mini-coding-agent = "main:main"
 
 [dependency-groups]
 dev = [
@@ -21,4 +21,12 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["mini_coding_agent"]
+py-modules = [
+    "main",
+    "mini_agent",
+    "workspace_context",
+    "session_store",
+    "fake_model_client",
+    "ollama_model_client",
+    "utils",
+]

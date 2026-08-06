@@ -3,7 +3,7 @@
 
 This folder contains a small standalone coding agent:
 
-- code: `mini_coding_agent.py`
+- code: `main.py`
 - CLI: `mini-coding-agent`
 
 It is a minimal local agent loop with:
@@ -61,7 +61,7 @@ Optional:
 
 - `uv` for environment management and the `mini-coding-agent` CLI entry point
 
-This project has no Python runtime dependency beyond the standard library, so you can run it directly with `python mini_coding_agent.py` if you do not want to use `uv`.
+This project has no Python runtime dependency beyond the standard library, so you can run it directly with `python main.py` if you do not want to use `uv`.
 
 &nbsp;
 ## Install Ollama
@@ -85,14 +85,14 @@ ollama serve
 In another terminal, pull a model. Example:
 
 ```bash
-ollama pull qwen3.5:4b
+ollama pull qwen3.5:9b
 ```
 
 Qwen 3.5 model library:
 
 - [ollama.com/library/qwen3.5](https://ollama.com/library/qwen3.5)
 
-The default in this project is `qwen3.5:4b`. If you have sufficient memory, it is worth trying a larger model such as `qwen3.5:9b` or another larger Qwen 3.5 variant. The agent just sends prompts to Ollama's `/api/generate` endpoint.
+The default in this project is `qwen3.5:9b`. If you have less memory available, try a smaller model such as `qwen3.5:4b`; if you have more, a larger Qwen 3.5 variant may work better. The agent just sends prompts to Ollama's `/api/generate` endpoint.
 
 &nbsp;
 ## Project Setup
@@ -127,12 +127,12 @@ Without `uv`, run the script directly:
 
 ```bash
 cd mini-coding-agent
-python mini_coding_agent.py
+python main.py
 ```
 
 By default it uses:
 
-- model: `qwen3.5:4b`
+- model: `qwen3.5:9b`
 - approval: `ask`
 
 For a concrete usage example, see [EXAMPLE.md](EXAMPLE.md).
@@ -209,7 +209,7 @@ uv run mini-coding-agent --help
 Without `uv`:
 
 ```bash
-python mini_coding_agent.py --help
+python main.py --help
 ```
 
 CLI flags are passed before the agent starts. Use them to choose the workspace,
@@ -220,7 +220,7 @@ Important flags:
 - `--cwd`
   sets the workspace directory the agent should inspect and modify; default: `.`
 - `--model`
-  selects the Ollama model name, such as `qwen3.5:4b`; default: `qwen3.5:4b`
+  selects the Ollama model name, such as `qwen3.5:9b`; default: `qwen3.5:9b`
 - `--host`
   points the agent at the Ollama server URL (usually not needed); default: `http://127.0.0.1:11434`
 - `--ollama-timeout`

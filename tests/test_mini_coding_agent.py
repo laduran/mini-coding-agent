@@ -2,14 +2,12 @@ import json
 import pytest
 from unittest.mock import patch
 
-from mini_coding_agent import (
-    FakeModelClient,
-    MiniAgent,
-    OllamaModelClient,
-    SessionStore,
-    WorkspaceContext,
-    build_welcome,
-)
+from fake_model_client import FakeModelClient
+from mini_agent import MiniAgent
+from ollama_model_client import OllamaModelClient
+from session_store import SessionStore
+from workspace_context import WorkspaceContext
+from main import build_welcome
 
 
 def build_workspace(tmp_path):
