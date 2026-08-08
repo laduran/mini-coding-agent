@@ -3,9 +3,10 @@ import re
 import shutil
 import subprocess
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from utils import clip, now, MAX_HISTORY, IGNORED_PATH_NAMES
+
+from utils import IGNORED_PATH_NAMES, MAX_HISTORY, clip, now
 
 
 class MiniAgent:
@@ -33,7 +34,7 @@ class MiniAgent:
         self.max_depth = max_depth
         self.read_only = read_only
         self.session = session or {
-            "id": datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6],
+            "id": datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6],
             "created_at": now(),
             "workspace_root": workspace.repo_root,
             "history": [],
@@ -117,34 +118,37 @@ class MiniAgent:
             risk = "approval required" if tool["risky"] else "safe"
             tool_lines.append(f"- {name}({fields}) [{risk}] {tool['description']}")
         tool_text = "\n".join(tool_lines)
-        examples = "\n".join(
-            [
-                '<tool>{"name":"list_files","args":{"path":"."}}</tool>',
-                '<tool>{"name":"read_file","args":{"path":"README.md","start":1,"end":80}}</tool>',
-                '<tool name="write_file" path="binary_search.py"><content>def binary_search(nums, target):\n    return -1\n</content></tool>',
-                '<tool name="patch_file" path="binary_search.py"><old_text>return -1</old_text><new_text>return mid</new_text></tool>',
-                '<tool>{"name":"run_shell","args":{"command":"uv run --with pytest python -m pytest -q","timeout":20}}</tool>',
-                "<final>Done.</final>",
-            ]
+        examples = (
+            '<tool>{"name":"list_files","args":{"path":"."}}</tool>\n'
+            '<tool>{"name":"read_file","args":{"path":"README.md","start":1,"end":80}}</tool>\n'
+            '<tool name="write_file" path="binary_search.py"><content>def binary_search(nums, target):\n'
+            "    return -1\n"
+            "</content></tool>\n"
+            '<tool name="patch_file" path="binary_search.py"><old_text>return -1</old_text><new_text>return mid</new_text></tool>\n'
+            '<tool>{"name":"run_shell","args":{"command":"uv run --with pytest python -m pytest -q","timeout":20}}</tool>\n'
+            "<final>Done.</final>"
         )
-        rules = "\n".join([
-            "- Use tools instead of guessing about the workspace.",
-            "- Return exactly one <tool>...</tool> or one <final>...</final>.",
-            "- Tool calls must look like:",
-            '  <tool>{"name":"tool_name","args":{...}}</tool>',
-            "- For write_file and patch_file with multi-line text, prefer XML style:",
-            '  <tool name="write_file" path="file.py"><content>...</content></tool>',
-            "- Final answers must look like:",
-            "  <final>your answer</final>",
-            "- Never invent tool results.",
-            "- Keep answers concise and concrete.",
-            "- If the user asks you to create or update a specific file and the path is clear, use write_file or patch_file instead of repeatedly listing files.",
-            "- Before writing tests for existing code, read the implementation first.",
-            "- When writing tests, match the current implementation unless the user explicitly asked you to change the code.",
-            "- New files should be complete and runnable, including obvious imports.",
-            "- Do not repeat the same tool call with the same arguments if it did not help. Choose a different tool or return a final answer.",
-            "- Required tool arguments must not be empty. Do not call read_file, write_file, patch_file, run_shell, or delegate with args={}.",
-        ])
+        rules = (
+            "- Use tools instead of guessing about the workspace.\n"
+            "- Return exactly one <tool>...</tool> or one <final>...</final>.\n"
+            "- Tool calls must look like:\n"
+            '  <tool>{"name":"tool_name","args":{...}}</tool>\n'
+            "- For write_file and patch_file with multi-line text, prefer XML style:\n"
+            '  <tool name="write_file" path="file.py"><content>...</content></tool>\n'
+            "- Final answers must look like:\n"
+            "  <final>your answer</final>\n"
+            "- Never invent tool results.\n"
+            "- Keep answers concise and concrete.\n"
+            "- If the user asks you to create or update a specific file and the path is clear, "
+            "use write_file or patch_file instead of repeatedly listing files.\n"
+            "- Before writing tests for existing code, read the implementation first.\n"
+            "- When writing tests, match the current implementation unless the user explicitly asked you to change the code.\n"
+            "- New files should be complete and runnable, including obvious imports.\n"
+            "- Do not repeat the same tool call with the same arguments if it did not help. "
+            "Choose a different tool or return a final answer.\n"
+            "- Required tool arguments must not be empty. "
+            "Do not call read_file, write_file, patch_file, run_shell, or delegate with args={}."
+        )
         return "\n\n".join([
             "You are Mini-Coding-Agent, a small local coding agent running through Ollama.",
             "Rules:\n" + rules,
@@ -273,7 +277,7 @@ class MiniAgent:
             return f"error: unknown tool '{name}'"
         try:
             self.validate_tool(name, args)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any validation failure becomes a tool-result error, not a crash
             example = self.tool_example(name)
             message = f"error: invalid arguments for {name}: {exc}"
             if example:
@@ -285,7 +289,7 @@ class MiniAgent:
             return f"error: approval denied for {name}"
         try:
             return clip(tool["run"](args))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any tool failure becomes a tool-result error, not a crash
             return f"error: tool {name} failed: {exc}"
 
     def repeated_tool_call(self, name, args):
@@ -393,7 +397,7 @@ class MiniAgent:
             body = MiniAgent.extract(raw, "tool")
             try:
                 payload = json.loads(body)
-            except Exception:
+            except json.JSONDecodeError:
                 return "retry", MiniAgent.retry_notice("model returned malformed tool JSON")
             if not isinstance(payload, dict):
                 return "retry", MiniAgent.retry_notice("tool payload must be a JSON object")
@@ -434,7 +438,7 @@ class MiniAgent:
 
     @staticmethod
     def parse_xml_tool(raw):
-        match = re.search(r"<tool(?P<attrs>[^>]*)>(?P<body>.*?)</tool>", raw, re.S)
+        match = re.search(r"<tool(?P<attrs>[^>]*)>(?P<body>.*?)</tool>", raw, re.DOTALL)
         if not match:
             return None
         attrs = MiniAgent.parse_attrs(match.group("attrs"))
@@ -551,6 +555,7 @@ class MiniAgent:
                 cwd=self.root,
                 capture_output=True,
                 text=True,
+                check=False,
             )
             return result.stdout.strip() or result.stderr.strip() or "(no matches)"
 
@@ -581,6 +586,7 @@ class MiniAgent:
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
         )
         return "\n".join(
             [
