@@ -253,6 +253,28 @@ def test_repeated_identical_tool_call_is_rejected(tmp_path):
     assert result == "error: repeated identical tool call for list_files; choose a different tool or return a final answer"
 
 
+def test_repeated_tool_call_catches_default_equivalent_args(tmp_path):
+    """read_file({"path": x}) and read_file({"path": x, "start": 1, "end": 200}) are the same call."""
+    (tmp_path / "snake.html").write_text("<html></html>\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    agent.record(
+        {"role": "tool", "name": "read_file", "args": {"path": "snake.html"}, "content": "...", "created_at": "1"}
+    )
+    agent.record(
+        {
+            "role": "tool",
+            "name": "read_file",
+            "args": {"path": "snake.html", "start": 1, "end": 200},
+            "content": "...",
+            "created_at": "2",
+        }
+    )
+
+    result = agent.run_tool("read_file", {"path": "snake.html"})
+
+    assert result == "error: repeated identical tool call for read_file; choose a different tool or return a final answer"
+
+
 def test_welcome_screen_keeps_box_shape_for_long_paths(tmp_path):
     deep = tmp_path / "very" / "long" / "path" / "for" / "the" / "mini" / "agent" / "welcome" / "screen"
     deep.mkdir(parents=True)
