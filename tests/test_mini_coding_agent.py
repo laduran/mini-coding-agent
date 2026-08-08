@@ -46,6 +46,26 @@ def test_agent_runs_tool_then_final(tmp_path):
     assert "hello.txt" in agent.session["memory"]["files"]
 
 
+def test_on_progress_reports_thinking_tool_and_retry(tmp_path):
+    (tmp_path / "hello.txt").write_text("alpha\n", encoding="utf-8")
+    agent = build_agent(
+        tmp_path,
+        [
+            "",
+            '<tool>{"name":"read_file","args":{"path":"hello.txt","start":1,"end":2}}</tool>',
+            "<final>Done.</final>",
+        ],
+    )
+
+    messages = []
+    agent.ask("Inspect hello.txt", on_progress=messages.append)
+
+    assert any("thinking" in message for message in messages)
+    assert any("retrying" in message for message in messages)
+    assert any("running tool: read_file" in message for message in messages)
+    assert any("tool read_file done" in message for message in messages)
+
+
 def test_agent_retries_after_empty_model_output(tmp_path):
     agent = build_agent(
         tmp_path,
