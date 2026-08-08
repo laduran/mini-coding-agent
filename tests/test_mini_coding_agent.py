@@ -396,3 +396,36 @@ def test_ollama_client_posts_expected_payload():
     assert captured["body"]["raw"] is False
     assert captured["body"]["think"] is False
     assert captured["body"]["options"]["num_predict"] == 42
+    assert "num_ctx" not in captured["body"]["options"]
+
+
+def test_ollama_client_includes_num_ctx_when_context_length_set():
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"response": "<final>ok</final>"}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    client = OllamaModelClient(
+        model="qwen3.5:4b",
+        host="http://127.0.0.1:11434",
+        temperature=0.2,
+        top_p=0.9,
+        timeout=30,
+        context_length=8192,
+    )
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        client.complete("hello", 42)
+
+    assert captured["body"]["options"]["num_ctx"] == 8192
