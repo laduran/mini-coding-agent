@@ -130,12 +130,15 @@ def main(argv=None):
 
     print(build_welcome(agent, model=args.model, host=args.host))
 
+    def report_progress(message):
+        print(f"  ... {message}")
+
     if args.prompt:
         prompt = " ".join(args.prompt).strip()
         if prompt:
             print()
             try:
-                print(agent.ask(prompt))
+                print(agent.ask(prompt, on_progress=report_progress))
             except RuntimeError as exc:
                 print(str(exc), file=sys.stderr)
                 return 1
@@ -168,7 +171,7 @@ def main(argv=None):
 
         print()
         try:
-            print(agent.ask(user_input))
+            print(agent.ask(user_input, on_progress=report_progress))
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
 

@@ -217,7 +217,11 @@ class MiniAgent:
         note = f"{name}: {clip(str(result).replace(chr(10), ' '), 220)}"
         self.remember(memory["notes"], note, 5)
 
-    def ask(self, user_message):
+    def ask(self, user_message, on_progress=None):
+        def notify(message):
+            if on_progress:
+                on_progress(message)
+
         memory = self.session["memory"]
         if not memory["task"]:
             memory["task"] = clip(user_message.strip(), 300)
@@ -229,6 +233,7 @@ class MiniAgent:
 
         while tool_steps < self.max_steps and attempts < max_attempts:
             attempts += 1
+            notify(f"thinking... (attempt {attempts}/{max_attempts})")
             raw = self.model_client.complete(self.prompt(user_message), self.max_new_tokens)
             kind, payload = self.parse(raw)
 
@@ -236,7 +241,12 @@ class MiniAgent:
                 tool_steps += 1
                 name = payload.get("name", "")
                 args = payload.get("args", {})
+                notify(f"running tool: {name} ({tool_steps}/{self.max_steps})")
                 result = self.run_tool(name, args)
+                if result.startswith("error"):
+                    notify(f"tool {name} failed: {clip(result, 100)}")
+                else:
+                    notify(f"tool {name} done")
                 self.record(
                     {
                         "role": "tool",
@@ -250,6 +260,7 @@ class MiniAgent:
                 continue
 
             if kind == "retry":
+                notify("model output was malformed, retrying")
                 self.record({"role": "assistant", "content": payload, "created_at": now()})
                 continue
 
