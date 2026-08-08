@@ -5,6 +5,11 @@ import shutil
 import sys
 from pathlib import Path
 
+try:
+    import readline  # noqa: F401 - importing this enables arrow-key/history editing in input() on Unix
+except ImportError:
+    pass  # not available in the stdlib on Windows
+
 from mini_agent import MiniAgent
 from ollama_model_client import OllamaModelClient
 from session_store import SessionStore
@@ -64,6 +69,7 @@ def build_agent(args):
         temperature=args.temperature,
         top_p=args.top_p,
         timeout=args.ollama_timeout,
+        context_length=args.context_length,
     )
     session_id = args.resume
     if session_id == "latest":
@@ -98,6 +104,12 @@ def build_arg_parser():
     parser.add_argument("--model", default="qwen3.5:9b", help="Ollama model name.")
     parser.add_argument("--host", default="http://127.0.0.1:11434", help="Ollama server URL.")
     parser.add_argument("--ollama-timeout", type=int, default=300, help="Ollama request timeout in seconds.")
+    parser.add_argument(
+        "--context-length",
+        type=int,
+        default=None,
+        help="Override the model's context window (Ollama's num_ctx). Leave unset to use the model's default.",
+    )
     parser.add_argument("--resume", default=None, help="Session id to resume or 'latest'.")
     parser.add_argument(
         "--approval",

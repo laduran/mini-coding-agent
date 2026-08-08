@@ -4,25 +4,29 @@ import urllib.request
 
 
 class OllamaModelClient:
-    def __init__(self, model, host, temperature, top_p, timeout):
+    def __init__(self, model, host, temperature, top_p, timeout, context_length=None):
         self.model = model
         self.host = host.rstrip("/")
         self.temperature = temperature
         self.top_p = top_p
         self.timeout = timeout
+        self.context_length = context_length
 
     def complete(self, prompt, max_new_tokens):
+        options = {
+            "num_predict": max_new_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+        }
+        if self.context_length:
+            options["num_ctx"] = self.context_length
         payload = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
             "raw": False,
             "think": False,
-            "options": {
-                "num_predict": max_new_tokens,
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-            },
+            "options": options,
         }
         request = urllib.request.Request(
             self.host + "/api/generate",
