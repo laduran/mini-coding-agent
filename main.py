@@ -138,7 +138,7 @@ def main(argv=None):
 
         if not user_input:
             continue
-        if user_input in {"/exit", "/quit"}:
+        if user_input in {"/exit", "/quit", "/bye"}:
             return 0
         if user_input == "/help":
             print(HELP_DETAILS)
