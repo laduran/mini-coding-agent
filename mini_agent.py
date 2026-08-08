@@ -5,11 +5,22 @@ import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import ClassVar
 
 from utils import IGNORED_PATH_NAMES, MAX_HISTORY, clip, now
 
 
 class MiniAgent:
+    # Mirrors each tool's own default args (see build_tools/validate_tool), so
+    # repeated_tool_call() can recognize calls that differ only by omitting a
+    # value that matches the default rather than treating them as distinct.
+    TOOL_ARG_DEFAULTS: ClassVar[dict] = {
+        "list_files": {"path": "."},
+        "read_file": {"start": 1, "end": 200},
+        "search": {"path": "."},
+        "run_shell": {"timeout": 20},
+    }
+
     def __init__(
         self,
         model_client,
@@ -303,12 +314,20 @@ class MiniAgent:
         except Exception as exc:  # noqa: BLE001 - any tool failure becomes a tool-result error, not a crash
             return f"error: tool {name} failed: {exc}"
 
+    def normalize_args(self, name, args):
+        defaults = self.TOOL_ARG_DEFAULTS.get(name, {})
+        return {**defaults, **(args or {})}
+
     def repeated_tool_call(self, name, args):
         tool_events = [item for item in self.session["history"] if item["role"] == "tool"]
         if len(tool_events) < 2:
             return False
+        normalized = self.normalize_args(name, args)
         recent = tool_events[-2:]
-        return all(item["name"] == name and item["args"] == args for item in recent)
+        return all(
+            item["name"] == name and self.normalize_args(item["name"], item["args"]) == normalized
+            for item in recent
+        )
 
     def tool_example(self, name):
         examples = {
