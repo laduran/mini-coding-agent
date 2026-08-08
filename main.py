@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 
 import argparse
-import sys
 import shutil
+import sys
 from pathlib import Path
 
-from workspace_context import WorkspaceContext
-from session_store import SessionStore
-from ollama_model_client import OllamaModelClient
 from mini_agent import MiniAgent
-from utils import WELCOME_ART, HELP_DETAILS, middle
+from ollama_model_client import OllamaModelClient
+from session_store import SessionStore
+from utils import HELP_DETAILS, WELCOME_ART, middle
+from workspace_context import WorkspaceContext
 
 
 def build_welcome(agent, model, host):
@@ -133,7 +133,7 @@ def main(argv=None):
         try:
             user_input = input("\nmini-coding-agent> ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("")
+            print()
             return 0
 
         if not user_input:

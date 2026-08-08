@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+
 from utils import DOC_NAMES, clip
 
 
@@ -28,7 +29,7 @@ class WorkspaceContext:
                     timeout=5,
                 )
                 return result.stdout.strip() or fallback
-            except Exception:
+            except Exception:  # noqa: BLE001 - git missing/failing/timing out should all just fall back
                 return fallback
 
         repo_root = Path(git(["rev-parse", "--show-toplevel"], str(cwd))).resolve()
