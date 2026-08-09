@@ -16,7 +16,7 @@ HELP_DETAILS = (
     "/memory  Show the agent's distilled working memory.\n"
     "/session Show the path to the saved session file.\n"
     "/reset   Clear the current session history and memory.\n"
-    "/exit    Exit the agent."
+    "/exit    Exit the agent. (aliases: /quit, /bye)"
 )
 MAX_TOOL_OUTPUT = 4000
 MAX_HISTORY = 12000
