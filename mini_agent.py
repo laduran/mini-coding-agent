@@ -272,7 +272,7 @@ class MiniAgent:
 
             if kind == "retry":
                 notify("model output was malformed, retrying")
-                self.record({"role": "assistant", "content": payload, "created_at": now()})
+                self.record({"role": "assistant", "content": payload, "raw_output": clip(raw), "created_at": now()})
                 continue
 
             final = (payload or raw).strip()

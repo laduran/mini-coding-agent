@@ -99,6 +99,8 @@ def test_agent_retries_after_malformed_tool_payload(tmp_path):
     assert any(item["role"] == "tool" and item["name"] == "read_file" for item in agent.session["history"])
     notices = [item["content"] for item in agent.session["history"] if item["role"] == "assistant"]
     assert any("valid <tool> call" in item for item in notices)
+    retries = [item for item in agent.session["history"] if item["role"] == "assistant" and "raw_output" in item]
+    assert retries and retries[0]["raw_output"] == '<tool>{"name":"read_file","args":"bad"}</tool>'
 
 
 def test_agent_accepts_xml_write_file_tool(tmp_path):
