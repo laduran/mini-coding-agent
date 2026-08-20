@@ -97,17 +97,10 @@ The default in this project is `qwen3.5:9b`. If you have less memory available, 
 &nbsp;
 ## Project Setup
 
-Clone the repo or your fork and change into it:
+Clone the repo and change into it:
 
 ```bash
-git clone https://github.com/rasbt/mini-coding-agent.git
-cd mini-coding-agent
-```
-
-If you forked it first, use your fork URL instead:
-
-```bash
-git clone https://github.com/<your-github-user>/mini-coding-agent.git
+git clone https://github.com/laduran/mini-coding-agent.git
 cd mini-coding-agent
 ```
 
@@ -198,6 +191,8 @@ being sent to the model as a normal task.
   exits the interactive session
 - `/quit`
   exits the interactive session; alias for `/exit`
+- `/bye`
+  exits the interactive session; alias for `/exit`
 
 &nbsp;
 ## Main CLI Flags
@@ -225,6 +220,8 @@ Important flags:
   points the agent at the Ollama server URL (usually not needed); default: `http://127.0.0.1:11434`
 - `--ollama-timeout`
   controls how long the client waits for an Ollama response (usually not needed); default: `300` seconds
+- `--context-length`
+  overrides the model's context window (Ollama's `num_ctx`); default: unset, uses the model's own default
 - `--resume`
   resumes a saved session by id or uses `latest`; default: start a new session
 - `--approval`
