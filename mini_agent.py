@@ -17,6 +17,10 @@ from utils import (
     now,
 )
 
+# Prefix for the one error that means "you are going in circles" rather than
+# "that call was wrong", so the REPL can surface a stall distinctly.
+REPEAT_REJECTION = "error: repeated tool call"
+
 
 class MiniAgent:
     # Mirrors each tool's own default args (see build_tools/validate_tool), so
@@ -350,6 +354,7 @@ class MiniAgent:
 
         tool_steps = 0
         attempts = 0
+        stalls = 0
         max_attempts = max(self.max_steps * 3, self.max_steps + 4)
 
         while tool_steps < self.max_steps and attempts < max_attempts:
@@ -364,9 +369,18 @@ class MiniAgent:
                 args = payload.get("args", {})
                 notify(f"running tool: {name} ({tool_steps}/{self.max_steps})")
                 result = self.run_tool(name, args)
-                if result.startswith("error"):
+                if result.startswith(REPEAT_REJECTION):
+                    stalls += 1
+                    # Distinct from an ordinary failure: nothing is wrong with
+                    # the call, the model is just not moving on. Without this it
+                    # reads as N normal "running tool" lines until you open the
+                    # session file.
+                    notify(f"stalled: {name} repeated with no new information ({stalls}x in a row)")
+                elif result.startswith("error"):
+                    stalls = 0
                     notify(f"tool {name} failed: {clip(result, 100)}")
                 else:
+                    stalls = 0
                     notify(f"tool {name} done")
                 self.record(
                     {
@@ -416,7 +430,7 @@ class MiniAgent:
                 message += f"\nexample: {example}"
             return message
         if self.repeated_tool_call(name, args):
-            return f"error: repeated identical tool call for {name}; choose a different tool or return a final answer"
+            return self.repeat_rejection(name, args)
         if tool["risky"] and not self.approve(name, args):
             return f"error: approval denied for {name}"
         try:
@@ -427,6 +441,25 @@ class MiniAgent:
     def normalize_args(self, name, args):
         defaults = self.TOOL_ARG_DEFAULTS.get(name, {})
         return {**defaults, **(args or {})}
+
+    def repeat_rejection(self, name, args):
+        """Explain what the model already has, not just that it was blocked.
+
+        A rejection is only reached when the harness can still satisfy the call
+        from the prompt, so it can name where the answer already is instead of
+        the older, and sometimes untrue, "choose a different tool".
+        """
+        message = f"{REPEAT_REJECTION}: {name} was already called with these arguments and the result has not changed"
+        view = self.view_for(args.get("path")) if name == "read_file" else None
+        if view:
+            where = f"lines {view['start']}-{view['last']} of {view['total']}"
+            message += f". You already have {view['path']} ({where}) under 'Files you have read' above"
+            if view["partial"]:
+                message += ". To see the rest, call read_file with a different start/end range"
+            else:
+                message += ". Use patch_file or write_file to change it, or answer with <final>"
+            return message
+        return message + ". Choose a different tool or return a final answer"
 
     def repeated_tool_call(self, name, args):
         tool_events = [item for item in self.session["history"] if item["role"] == "tool"]
