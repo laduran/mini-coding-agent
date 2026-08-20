@@ -7,7 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
 
-from utils import IGNORED_PATH_NAMES, MAX_HISTORY, clip, now
+from utils import (
+    IGNORED_PATH_NAMES,
+    MAX_FILE_VIEW_CHARS,
+    MAX_FILE_VIEWS,
+    MAX_FILE_VIEWS_TOTAL,
+    MAX_HISTORY,
+    clip,
+    now,
+)
 
 
 class MiniAgent:
@@ -179,11 +187,102 @@ class MiniAgent:
             notes,
         ])
 
-    def history_text(self):
+    def touched_paths(self):
+        """Paths the model has successfully read or written, most recent first.
+
+        A write counts as having seen the file: the model authored that content.
+        """
+        seen = {}
+        for item in self.session["history"]:
+            if item["role"] != "tool" or item["name"] not in ("read_file", "write_file", "patch_file"):
+                continue
+            if str(item["content"]).startswith("error"):
+                continue
+            raw_path = item["args"].get("path")
+            if not raw_path:
+                continue
+            # Re-insert so the dict tracks most-recent order, not first-seen.
+            seen.pop(str(raw_path), None)
+            seen[str(raw_path)] = int(item["args"].get("start", 1)) if item["name"] == "read_file" else 1
+        return list(reversed(list(seen.items())))
+
+    def file_views(self):
+        """Re-read touched files from disk so their contents stay in the prompt.
+
+        The transcript clips tool output by recency, which used to drop the very
+        file contents a task depends on and left the model re-reading to recover
+        them. Reading fresh here also means the view can never go stale after a
+        write, and lets the loop guard tell "already have it" from "lost it".
+        """
+        views = []
+        total = 0
+        for raw_path, start in self.touched_paths():
+            if len(views) >= MAX_FILE_VIEWS or total >= MAX_FILE_VIEWS_TOTAL:
+                break
+            try:
+                path = self.path(raw_path)
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except (OSError, ValueError):  # outside the workspace, gone, or unreadable
+                continue
+            if not path.is_file():
+                continue
+
+            start = max(1, min(start, len(lines) or 1))
+            budget = min(MAX_FILE_VIEW_CHARS, MAX_FILE_VIEWS_TOTAL - total)
+            body = []
+            used = 0
+            last = start - 1
+            for number, line in enumerate(lines[start - 1:], start=start):
+                rendered = f"{number:>4}: {line}"
+                if used + len(rendered) + 1 > budget:
+                    break
+                body.append(rendered)
+                used += len(rendered) + 1
+                last = number
+
+            views.append({
+                "path": str(path.relative_to(self.root)),
+                "resolved": str(path),
+                "start": start,
+                "last": last,
+                "total": len(lines),
+                "body": "\n".join(body),
+                # Partial either because the budget ran out or because the model
+                # last read from a later line. Both mean "there is more on disk".
+                "partial": last < len(lines) or start > 1,
+            })
+            total += used
+        return views
+
+    def view_for(self, raw_path, views=None):
+        if not raw_path:
+            return None
+        try:
+            resolved = str(self.path(raw_path))
+        except ValueError:
+            return None
+        views = self.file_views() if views is None else views
+        return next((view for view in views if view["resolved"] == resolved), None)
+
+    def file_views_text(self, views=None):
+        views = self.file_views() if views is None else views
+        if not views:
+            return "Files you have read:\n- none"
+        blocks = ["Files you have read (current contents, re-read from disk):"]
+        for view in views:
+            header = f"- {view['path']} (lines {view['start']}-{view['last']} of {view['total']})"
+            if view["partial"]:
+                header += " [partial - use read_file with start/end for the rest]"
+            blocks.append(header)
+            blocks.append(view["body"])
+        return "\n".join(blocks)
+
+    def history_text(self, views=None):
         history = self.session["history"]
         if not history:
             return "- empty"
 
+        views = self.file_views() if views is None else views
         lines = []
         seen_reads = set()
         recent_start = max(0, len(history) - 6)
@@ -192,11 +291,20 @@ class MiniAgent:
             if item["role"] == "tool" and item["name"] in ("write_file", "patch_file"):
                 path = str(item["args"].get("path", ""))
                 seen_reads.discard(path)
-            if item["role"] == "tool" and item["name"] == "read_file" and not recent:
-                path = str(item["args"].get("path", ""))
-                if path in seen_reads:
+
+            if item["role"] == "tool" and item["name"] == "read_file":
+                view = self.view_for(item["args"].get("path"), views)
+                if view is not None:
+                    # Content lives in the Files section above; a clipped second
+                    # copy here would just crowd out the transcript.
+                    lines.append(f"[tool:read_file] {json.dumps(item['args'], sort_keys=True)}")
+                    lines.append(f"(contents shown above under {view['path']})")
                     continue
-                seen_reads.add(path)
+                if not recent:
+                    path = str(item["args"].get("path", ""))
+                    if path in seen_reads:
+                        continue
+                    seen_reads.add(path)
 
             if item["role"] == "tool":
                 limit = 900 if recent else 180
@@ -209,10 +317,12 @@ class MiniAgent:
         return clip("\n".join(lines), MAX_HISTORY)
 
     def prompt(self, user_message):
+        views = self.file_views()
         return "\n\n".join([
             self.prefix,
             self.memory_text(),
-            "Transcript:\n" + self.history_text(),
+            self.file_views_text(views),
+            "Transcript:\n" + self.history_text(views),
             "Current user request:\n" + user_message,
         ])
 
@@ -324,10 +434,16 @@ class MiniAgent:
             return False
         normalized = self.normalize_args(name, args)
         recent = tool_events[-2:]
-        return all(
+        repeated = all(
             item["name"] == name and self.normalize_args(item["name"], item["args"]) == normalized
             for item in recent
         )
+        if repeated and name == "read_file" and self.view_for(args.get("path")) is None:
+            # The contents aren't in the prompt anymore (evicted by the file-view
+            # budget, or unreadable), so re-reading is the model's only way back
+            # to them. Blocking here is what used to deadlock the loop.
+            return False
+        return repeated
 
     def tool_example(self, name):
         examples = {

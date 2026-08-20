@@ -20,6 +20,13 @@ HELP_DETAILS = (
 )
 MAX_TOOL_OUTPUT = 4000
 MAX_HISTORY = 12000
+# Files the model has read are re-materialized in the prompt from disk rather
+# than left to decay out of the clipped transcript. Budgets are deliberately
+# larger than MAX_TOOL_OUTPUT: the transcript copy is a pointer, so these bytes
+# replace the clipped ones instead of adding to them.
+MAX_FILE_VIEWS = 3
+MAX_FILE_VIEW_CHARS = 8000
+MAX_FILE_VIEWS_TOTAL = 12000
 IGNORED_PATH_NAMES = {".git", ".mini-coding-agent", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv", "venv"}
 
 

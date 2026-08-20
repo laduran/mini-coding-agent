@@ -8,6 +8,7 @@ from main import build_welcome
 from mini_agent import MiniAgent
 from ollama_model_client import OllamaModelClient
 from session_store import SessionStore
+from utils import MAX_FILE_VIEWS
 from workspace_context import WorkspaceContext
 
 
@@ -473,3 +474,113 @@ def test_ollama_client_includes_num_ctx_when_context_length_set():
         client.complete("hello", 42)
 
     assert captured["body"]["options"]["num_ctx"] == 8192
+
+
+def _long_file(lines):
+    return "".join(f"line {number} filler filler filler filler filler\n" for number in range(1, lines + 1))
+
+
+def test_file_view_keeps_contents_visible_as_history_grows(tmp_path):
+    """Regression for the re-read deadlock.
+
+    Reproduced from session 20260808-064102-ab9d37: a read_file result was
+    clipped by recency until the code the task depended on was no longer in the
+    prompt, so the model re-read to recover it and the loop guard blocked it.
+    The materialized view must not decay as the transcript grows.
+    """
+    # The marker sits past the filler, where recency clipping used to cut. It
+    # appears nowhere else in the prompt, so finding it can only mean the file
+    # view carried it in.
+    body = _long_file(120) + "def repair_me():\n    return 'TAIL_MARKER'\n"
+    (tmp_path / "app.py").write_text(body, encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+
+    agent.record({"role": "user", "content": "fix the bug", "created_at": "0"})
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "app.py"},
+        "content": "# app.py\n   1: line 1 filler\n", "created_at": "1",
+    })
+    assert "TAIL_MARKER" in agent.prompt("fix the bug")
+
+    # The tail must survive many more turns, not erode out as history grows.
+    for index in range(2, 20):
+        agent.record(_make_filler(index))
+    assert "TAIL_MARKER" in agent.prompt("fix the bug")
+    # Guard the test itself: the transcript alone must not supply the marker,
+    # otherwise this would pass even with the file view removed.
+    assert "TAIL_MARKER" not in agent.history_text(views=[])
+
+
+def test_file_view_reflects_disk_after_write(tmp_path):
+    """A write must not leave a stale materialized copy behind."""
+    (tmp_path / "conf.txt") .write_text("setting=true\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "conf.txt"},
+        "content": "# conf.txt\n   1: setting=true\n", "created_at": "0",
+    })
+    assert "setting=true" in agent.file_views_text()
+
+    (tmp_path / "conf.txt").write_text("setting=false\n", encoding="utf-8")
+    views = agent.file_views_text()
+    assert "setting=false" in views
+    assert "setting=true" not in views
+
+
+def test_repeated_read_allowed_when_view_is_unavailable(tmp_path):
+    """The guard may only block a re-read the harness can still satisfy."""
+    (tmp_path / "kept.txt").write_text("kept\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    for index in range(2):
+        agent.record({
+            "role": "tool", "name": "read_file", "args": {"path": "kept.txt"},
+            "content": "# kept.txt\n   1: kept\n", "created_at": str(index),
+        })
+
+    # Materialized -> the contents are in the prompt, so the repeat is redundant.
+    assert agent.repeated_tool_call("read_file", {"path": "kept.txt"}) is True
+
+    # Not materialized (deleted from disk) -> blocking would strand the model.
+    (tmp_path / "kept.txt").unlink()
+    assert agent.repeated_tool_call("read_file", {"path": "kept.txt"}) is False
+
+
+def test_file_view_budget_evicts_oldest_and_marks_partial(tmp_path):
+    """Budgets are enforced, and a clipped view says so."""
+    for name in ("a.py", "b.py", "c.py", "d.py"):
+        (tmp_path / name).write_text(f"# {name}\n", encoding="utf-8")
+    (tmp_path / "big.py").write_text(_long_file(4000), encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    for index, name in enumerate(("a.py", "b.py", "c.py", "d.py")):
+        agent.record({
+            "role": "tool", "name": "read_file", "args": {"path": name},
+            "content": f"# {name}\n", "created_at": str(index),
+        })
+
+    views = agent.file_views()
+    assert len(views) == MAX_FILE_VIEWS
+    # Most recent kept, oldest evicted.
+    assert [view["path"] for view in views] == ["d.py", "c.py", "b.py"]
+
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "big.py"},
+        "content": "# big.py\n", "created_at": "9",
+    })
+    big = agent.view_for("big.py")
+    assert big["partial"] is True
+    assert big["last"] < big["total"]
+    assert "partial" in agent.file_views_text()
+
+
+def test_materialized_read_collapses_to_pointer_in_transcript(tmp_path):
+    """Transcript keeps a reference, not a second clipped copy of the bytes."""
+    (tmp_path / "app.py").write_text("alpha\nbravo\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "app.py"},
+        "content": "# app.py\n   1: alpha\n   2: bravo\n", "created_at": "0",
+    })
+    history = agent.history_text()
+    assert "contents shown above under app.py" in history
+    assert "1: alpha" not in history
+    assert "1: alpha" in agent.file_views_text()
