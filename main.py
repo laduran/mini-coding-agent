@@ -118,7 +118,16 @@ def build_arg_parser():
         help="Approval policy for risky tools; auto grants the model arbitrary command execution and file writes.",
     )
     parser.add_argument("--max-steps", type=int, default=6, help="Maximum tool/model iterations per request.")
-    parser.add_argument("--max-new-tokens", type=int, default=512, help="Maximum model output tokens per step.")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=4096,
+        help=(
+            "Maximum model output tokens per step. Writing a whole source file in one "
+            "tool call costs well over 1k tokens, and a call cut off mid-content can "
+            "never parse. Keep this reachable within --ollama-timeout."
+        ),
+    )
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature sent to Ollama.")
     parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling value sent to Ollama.")
     return parser

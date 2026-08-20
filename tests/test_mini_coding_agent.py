@@ -5,9 +5,10 @@ import pytest
 
 from fake_model_client import FakeModelClient
 from main import build_welcome
-from mini_agent import MiniAgent
+from mini_agent import REPEAT_REJECTION, MiniAgent
 from ollama_model_client import OllamaModelClient
 from session_store import SessionStore
+from utils import MAX_FILE_VIEWS
 from workspace_context import WorkspaceContext
 
 
@@ -252,7 +253,10 @@ def test_repeated_identical_tool_call_is_rejected(tmp_path):
 
     result = agent.run_tool("list_files", {})
 
-    assert result == "error: repeated identical tool call for list_files; choose a different tool or return a final answer"
+    assert result.startswith(REPEAT_REJECTION)
+    assert "list_files" in result
+    # No file view to point at, so the generic escape hatch still applies.
+    assert "Choose a different tool or return a final answer" in result
 
 
 def test_repeated_tool_call_catches_default_equivalent_args(tmp_path):
@@ -274,7 +278,63 @@ def test_repeated_tool_call_catches_default_equivalent_args(tmp_path):
 
     result = agent.run_tool("read_file", {"path": "snake.html"})
 
-    assert result == "error: repeated identical tool call for read_file; choose a different tool or return a final answer"
+    assert result.startswith(REPEAT_REJECTION)
+
+
+def test_repeat_rejection_names_what_the_model_already_has(tmp_path):
+    """The rejection must point at the content, not just refuse the call."""
+    (tmp_path / "snake.html").write_text("<html>\n<body>\n</body>\n</html>\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    for index in range(2):
+        agent.record({
+            "role": "tool", "name": "read_file", "args": {"path": "snake.html"},
+            "content": "...", "created_at": str(index),
+        })
+
+    result = agent.run_tool("read_file", {"path": "snake.html"})
+
+    assert "snake.html" in result
+    assert "Files you have read" in result
+    assert "patch_file or write_file" in result
+
+
+def test_repeat_rejection_points_at_the_rest_of_a_partial_file(tmp_path):
+    """A truncated view must send the model to a new range, not to a final answer."""
+    (tmp_path / "big.py").write_text(_long_file(4000), encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    for index in range(2):
+        agent.record({
+            "role": "tool", "name": "read_file", "args": {"path": "big.py"},
+            "content": "...", "created_at": str(index),
+        })
+
+    result = agent.run_tool("read_file", {"path": "big.py"})
+
+    assert "start/end" in result
+    assert "patch_file or write_file" not in result
+
+
+def test_stalled_repeat_is_reported_distinctly_from_a_failure(tmp_path):
+    """A stall must not look like ordinary tool progress in the REPL."""
+    (tmp_path / "notes.txt").write_text("alpha\n", encoding="utf-8")
+    agent = build_agent(
+        tmp_path,
+        [
+            '<tool>{"name":"read_file","args":{"path":"notes.txt"}}</tool>',
+            '<tool>{"name":"read_file","args":{"path":"notes.txt"}}</tool>',
+            '<tool>{"name":"read_file","args":{"path":"notes.txt"}}</tool>',
+            "<final>Done.</final>",
+        ],
+    )
+
+    messages = []
+    agent.ask("look at notes.txt", on_progress=messages.append)
+
+    stalls = [message for message in messages if message.startswith("stalled:")]
+    assert stalls, messages
+    # Counts consecutive repeats so a deepening stall is visible as it happens.
+    assert "1x in a row" in stalls[0]
+    assert not any(message.startswith("tool read_file failed") for message in stalls)
 
 
 def test_welcome_screen_keeps_box_shape_for_long_paths(tmp_path):
@@ -473,3 +533,174 @@ def test_ollama_client_includes_num_ctx_when_context_length_set():
         client.complete("hello", 42)
 
     assert captured["body"]["options"]["num_ctx"] == 8192
+
+
+def _long_file(lines):
+    return "".join(f"line {number} filler filler filler filler filler\n" for number in range(1, lines + 1))
+
+
+def test_file_view_keeps_contents_visible_as_history_grows(tmp_path):
+    """Regression for the re-read deadlock.
+
+    Reproduced from session 20260808-064102-ab9d37: a read_file result was
+    clipped by recency until the code the task depended on was no longer in the
+    prompt, so the model re-read to recover it and the loop guard blocked it.
+    The materialized view must not decay as the transcript grows.
+    """
+    # The marker sits past the filler, where recency clipping used to cut. It
+    # appears nowhere else in the prompt, so finding it can only mean the file
+    # view carried it in.
+    body = _long_file(120) + "def repair_me():\n    return 'TAIL_MARKER'\n"
+    (tmp_path / "app.py").write_text(body, encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+
+    agent.record({"role": "user", "content": "fix the bug", "created_at": "0"})
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "app.py"},
+        "content": "# app.py\n   1: line 1 filler\n", "created_at": "1",
+    })
+    assert "TAIL_MARKER" in agent.prompt("fix the bug")
+
+    # The tail must survive many more turns, not erode out as history grows.
+    for index in range(2, 20):
+        agent.record(_make_filler(index))
+    assert "TAIL_MARKER" in agent.prompt("fix the bug")
+    # Guard the test itself: the transcript alone must not supply the marker,
+    # otherwise this would pass even with the file view removed.
+    assert "TAIL_MARKER" not in agent.history_text(views=[])
+
+
+def test_file_view_reflects_disk_after_write(tmp_path):
+    """A write must not leave a stale materialized copy behind."""
+    (tmp_path / "conf.txt") .write_text("setting=true\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "conf.txt"},
+        "content": "# conf.txt\n   1: setting=true\n", "created_at": "0",
+    })
+    assert "setting=true" in agent.file_views_text()
+
+    (tmp_path / "conf.txt").write_text("setting=false\n", encoding="utf-8")
+    views = agent.file_views_text()
+    assert "setting=false" in views
+    assert "setting=true" not in views
+
+
+def test_repeated_read_allowed_when_view_is_unavailable(tmp_path):
+    """The guard may only block a re-read the harness can still satisfy."""
+    (tmp_path / "kept.txt").write_text("kept\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    for index in range(2):
+        agent.record({
+            "role": "tool", "name": "read_file", "args": {"path": "kept.txt"},
+            "content": "# kept.txt\n   1: kept\n", "created_at": str(index),
+        })
+
+    # Materialized -> the contents are in the prompt, so the repeat is redundant.
+    assert agent.repeated_tool_call("read_file", {"path": "kept.txt"}) is True
+
+    # Not materialized (deleted from disk) -> blocking would strand the model.
+    (tmp_path / "kept.txt").unlink()
+    assert agent.repeated_tool_call("read_file", {"path": "kept.txt"}) is False
+
+
+def test_file_view_budget_evicts_oldest_and_marks_partial(tmp_path):
+    """Budgets are enforced, and a clipped view says so."""
+    for name in ("a.py", "b.py", "c.py", "d.py"):
+        (tmp_path / name).write_text(f"# {name}\n", encoding="utf-8")
+    (tmp_path / "big.py").write_text(_long_file(4000), encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    for index, name in enumerate(("a.py", "b.py", "c.py", "d.py")):
+        agent.record({
+            "role": "tool", "name": "read_file", "args": {"path": name},
+            "content": f"# {name}\n", "created_at": str(index),
+        })
+
+    views = agent.file_views()
+    assert len(views) == MAX_FILE_VIEWS
+    # Most recent kept, oldest evicted.
+    assert [view["path"] for view in views] == ["d.py", "c.py", "b.py"]
+
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "big.py"},
+        "content": "# big.py\n", "created_at": "9",
+    })
+    big = agent.view_for("big.py")
+    assert big["partial"] is True
+    assert big["last"] < big["total"]
+    assert "partial" in agent.file_views_text()
+
+
+def test_materialized_read_collapses_to_pointer_in_transcript(tmp_path):
+    """Transcript keeps a reference, not a second clipped copy of the bytes."""
+    (tmp_path / "app.py").write_text("alpha\nbravo\n", encoding="utf-8")
+    agent = build_agent(tmp_path, [])
+    agent.record({
+        "role": "tool", "name": "read_file", "args": {"path": "app.py"},
+        "content": "# app.py\n   1: alpha\n   2: bravo\n", "created_at": "0",
+    })
+    history = agent.history_text()
+    assert "contents shown above under app.py" in history
+    assert "1: alpha" not in history
+    assert "1: alpha" in agent.file_views_text()
+
+
+def test_stuck_read_loop_from_session_20260808_064102_is_recoverable(tmp_path):
+    """End-to-end regression for the deadlock in session 20260808-064102-ab9d37.
+
+    Original shape: write a file, be told it has a bug, read it, then repeat that
+    same read until --max-steps ran out -- because the contents had been clipped
+    out of the prompt and the guard refused the re-read that would restore them.
+
+    Now the contents stay in the prompt, so the model can act on the second turn
+    instead of circling, and the run ends with the file actually fixed.
+    """
+    body = _long_file(120) + "function gameLoop() {\n  head = snake[0] + BUGGY_DELTA;\n}\n"
+    (tmp_path / "snake.html").write_text(body, encoding="utf-8")
+
+    agent = build_agent(
+        tmp_path,
+        [
+            '<tool>{"name":"read_file","args":{"path":"snake.html","start":1,"end":200}}</tool>',
+            (
+                '<tool name="patch_file" path="snake.html">'
+                "<old_text>head = snake[0] + BUGGY_DELTA;</old_text>"
+                "<new_text>head = snake[0] + FIXED_DELTA;</new_text></tool>"
+            ),
+            "<final>Fixed the immediate game over.</final>",
+        ],
+        max_steps=10,
+    )
+
+    messages = []
+    answer = agent.ask("the game ends immediately, please fix it", on_progress=messages.append)
+
+    assert answer == "Fixed the immediate game over."
+    assert "FIXED_DELTA" in (tmp_path / "snake.html").read_text(encoding="utf-8")
+    # The buggy line had to be visible for the patch to be possible at all.
+    assert "BUGGY_DELTA" in agent.model_client.prompts[1]
+    # Nowhere near the step limit, and no stall.
+    tool_events = [item for item in agent.session["history"] if item["role"] == "tool"]
+    assert len(tool_events) == 2
+    assert not [message for message in messages if message.startswith("stalled:")]
+
+
+def test_stubborn_repeat_loop_terminates_within_budget(tmp_path):
+    """Even a model that will not move on must end the turn, visibly."""
+    (tmp_path / "snake.html").write_text(_long_file(10), encoding="utf-8")
+    repeat = '<tool>{"name":"read_file","args":{"path":"snake.html","start":1,"end":200}}</tool>'
+    agent = build_agent(tmp_path, [repeat] * 12, max_steps=4)
+
+    messages = []
+    answer = agent.ask("fix it", on_progress=messages.append)
+
+    assert "step limit" in answer
+    tool_events = [item for item in agent.session["history"] if item["role"] == "tool"]
+    assert len(tool_events) == agent.max_steps
+    # The guard compares against the last two tool events, so the first two
+    # reads are served before any repeat can be established.
+    stalls = [message for message in messages if message.startswith("stalled:")]
+    assert len(stalls) == agent.max_steps - 2
+    assert "2x in a row" in stalls[-1]
+    # The rejection stays actionable rather than repeating a generic refusal.
+    assert all("Files you have read" in item["content"] for item in tool_events[2:])

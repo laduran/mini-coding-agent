@@ -229,7 +229,11 @@ Important flags:
 - `--max-steps`
   limits how many model and tool turns are allowed for one user request; default: `6`
 - `--max-new-tokens`
-  caps the model output length for each step; default: `512`
+  caps the model output length for each step; default: `4096`.
+  Writing a whole source file in one tool call costs well over 1k tokens, and a
+  tool call truncated mid-`<content>` can never parse — the agent just retries
+  the same truncated output until it gives up. Keep this value reachable within
+  `--ollama-timeout`: at roughly 25 tok/s, 4096 tokens takes about 2.5 minutes.
 - `--temperature`
   controls sampling randomness; default: `0.2`
 - `--top-p`
