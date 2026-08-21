@@ -13,7 +13,7 @@ except ImportError:
 from mini_agent import MiniAgent
 from ollama_model_client import OllamaModelClient
 from session_store import SessionStore
-from utils import HELP_DETAILS, WELCOME_ART, middle
+from utils import HELP_DETAILS, WELCOME_ART, colorize_logo, enable_windows_ansi, middle
 from workspace_context import WorkspaceContext
 
 
@@ -35,6 +35,11 @@ def build_welcome(agent, model, host):
         body = middle(text, inner)
         return f"| {body.center(inner)} |"
 
+    def art_row(text):
+        # Colorize after centring so the ANSI codes never reach the width math.
+        body = middle(text, inner)
+        return f"| {colorize_logo(body.center(inner))} |"
+
     def cell(label, value, size):
         body = middle(f"{label:<9} {value}", size)
         return body.ljust(size)
@@ -45,7 +50,7 @@ def build_welcome(agent, model, host):
         return f"| {left}{' ' * gap}{right} |"
 
     line = divider("=")
-    rows = [center(text) for text in WELCOME_ART]
+    rows = [art_row(text) for text in WELCOME_ART]
     rows.extend(
         [
             center("MINI CODING AGENT"),
@@ -135,6 +140,7 @@ def build_arg_parser():
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+    enable_windows_ansi()
     agent = build_agent(args)
 
     print(build_welcome(agent, model=args.model, host=args.host))

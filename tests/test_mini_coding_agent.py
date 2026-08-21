@@ -8,7 +8,14 @@ from main import build_welcome
 from mini_agent import REPEAT_REJECTION, MiniAgent
 from ollama_model_client import OllamaModelClient
 from session_store import SessionStore
-from utils import MAX_FILE_VIEWS
+from utils import (
+    ANSI_RESET,
+    BRACE_RGB,
+    MAX_FILE_VIEWS,
+    TREE_RGB,
+    color_enabled,
+    colorize_logo,
+)
 from workspace_context import WorkspaceContext
 
 
@@ -348,7 +355,11 @@ def test_welcome_screen_keeps_box_shape_for_long_paths(tmp_path):
     assert len(lines) >= 5
     assert len({len(line) for line in lines}) == 1
     assert "..." in welcome
-    assert "O   O" in welcome
+    # A distinctive row of the tree logo, to catch the art being dropped entirely.
+    assert "]]]]" in welcome
+    # Plain text when stdout is not a terminal, so the width assertion above is
+    # measuring real columns rather than ANSI escapes.
+    assert "\033[" not in welcome
     assert "MINI-CODING-AGENT" not in welcome
     assert "MINI CODING AGENT" in welcome
     assert "// READY" not in welcome
@@ -704,3 +715,45 @@ def test_stubborn_repeat_loop_terminates_within_budget(tmp_path):
     assert "2x in a row" in stalls[-1]
     # The rejection stays actionable rather than repeating a generic refusal.
     assert all("Files you have read" in item["content"] for item in tool_events[2:])
+
+
+def test_colorize_logo_separates_braces_from_foliage():
+    """Runs are classified by content, not by character.
+
+    The two elements share characters — a stray "]" sits inside the foliage and
+    a "-" hangs off a brace — so per-character coloring would mis-tint both.
+    """
+    brace = f"\033[38;2;{BRACE_RGB[0]};{BRACE_RGB[1]};{BRACE_RGB[2]}m"
+    tree = f"\033[38;2;{TREE_RGB[0]};{TREE_RGB[1]};{TREE_RGB[2]}m"
+
+    line = colorize_logo("      ]]     ~~~~~~~~~~~]       ]]      ", enabled=True)
+    assert line.count(brace) == 2  # the two braces
+    assert line.count(tree) == 1  # foliage, including its trailing "]"
+    assert f"{tree}~~~~~~~~~~~]{ANSI_RESET}" in line
+
+    # A "-" touching a brace stays with the brace.
+    line = colorize_logo("      ]]]]       ~~~+         -]]]      ", enabled=True)
+    assert f"{brace}-]]]{ANSI_RESET}" in line
+
+
+def test_colorize_logo_is_a_noop_when_color_is_disabled():
+    """Redirected output must stay plain so escapes never reach a transcript."""
+    raw = "       ]]]]    ~~~~~~~++     ]]]]       "
+    assert colorize_logo(raw, enabled=False) == raw
+
+
+def test_color_enabled_respects_no_color_and_tty(monkeypatch):
+    class Stream:
+        def __init__(self, tty):
+            self._tty = tty
+
+        def isatty(self):
+            return self._tty
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert color_enabled(Stream(True)) is True
+    assert color_enabled(Stream(False)) is False
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert color_enabled(Stream(True)) is False
