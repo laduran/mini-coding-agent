@@ -355,8 +355,9 @@ def test_welcome_screen_keeps_box_shape_for_long_paths(tmp_path):
     assert len(lines) >= 5
     assert len({len(line) for line in lines}) == 1
     assert "..." in welcome
-    # A distinctive row of the tree logo, to catch the art being dropped entirely.
-    assert "]]]]" in welcome
+    # Distinctive rows of the tree logo, to catch the art being dropped entirely.
+    assert "{{{{" in welcome
+    assert "}}}}" in welcome
     # Plain text when stdout is not a terminal, so the width assertion above is
     # measuring real columns rather than ANSI escapes.
     assert "\033[" not in welcome
@@ -726,19 +727,20 @@ def test_colorize_logo_separates_braces_from_foliage():
     brace = f"\033[38;2;{BRACE_RGB[0]};{BRACE_RGB[1]};{BRACE_RGB[2]}m"
     tree = f"\033[38;2;{TREE_RGB[0]};{TREE_RGB[1]};{TREE_RGB[2]}m"
 
-    line = colorize_logo("      ]]     ~~~~~~~~~~~]       ]]      ", enabled=True)
+    line = colorize_logo("      {{     ***********]       }}      ", enabled=True)
     assert line.count(brace) == 2  # the two braces
     assert line.count(tree) == 1  # foliage, including its trailing "]"
-    assert f"{tree}~~~~~~~~~~~]{ANSI_RESET}" in line
+    assert f"{tree}***********]{ANSI_RESET}" in line
 
-    # A "-" touching a brace stays with the brace.
-    line = colorize_logo("      ]]]]       ~~~+         -]]]      ", enabled=True)
-    assert f"{brace}-]]]{ANSI_RESET}" in line
+    # Foliage split across a gap is still all foliage.
+    line = colorize_logo("   {{{       **********   *       }}}   ", enabled=True)
+    assert line.count(tree) == 2
+    assert f"{brace}{{{{{{{ANSI_RESET}" in line
 
 
 def test_colorize_logo_is_a_noop_when_color_is_disabled():
     """Redirected output must stay plain so escapes never reach a transcript."""
-    raw = "       ]]]]    ~~~~~~~++     ]]]]       "
+    raw = "       {{{{    *******++     }}}}       "
     assert colorize_logo(raw, enabled=False) == raw
 
 

@@ -6,36 +6,37 @@ from datetime import datetime, timezone
 DOC_NAMES = ("AGENTS.md", "README.md", "pyproject.toml", "package.json")
 HELP_TEXT = "/help, /memory, /session, /reset, /exit"
 WELCOME_ART = (
-    "                 _~                     ",
-    "               ~~~~~~~                  ",
-    "       ]]]]    ~~~~~~~++     ]]]]       ",
-    "      ]]]]     ~~~~~~~~       ]]]]      ",
-    "      ]]     ~+~~~~~~~~+        ]]      ",
-    "      ]]      ~+~~~~~~~~~~      ]]      ",
-    "      ]]     ~~~~~~~~~~~]       ]]      ",
-    "      ]]      +~~~~~~~~~~~      ]]      ",
-    "     ]]]      ~~~~~~~~~~~~      ]]]     ",
-    "   ]]?       ~~~~~~~~~~   ~       ?]]   ",
-    "     ]]]       ~~~~~~+~~        ]]]     ",
-    "      ]]      ~~~~~~~+~~+       ]]      ",
-    "      ]]      +~~~~~~~~~        ]]      ",
-    "      ]]       +~+~~~~+~~+      ]]      ",
-    "      ]]       ++~+~~~~~~       ]]      ",
-    "      ]]]]       ~~~+         -]]]      ",
-    "       ]]]]       +~         ]]]]       ",
-    "                _+~~>                   ",
-    "                  ~~                    ",
+    "                 _*                     ",
+    "               *******                  ",
+    "       {{{{    *******++     }}}}       ",
+    "      {{{{     ********       }}}}      ",
+    "      {{     *+********+        }}      ",
+    "      {{      *+**********      }}      ",
+    "      {{     ***********]       }}      ",
+    "      {{      +***********      }}      ",
+    "     {{{      ************      }}}     ",
+    "   {{{       **********   *       }}}   ",
+    "     {{{       ******+**        }}}     ",
+    "      {{      *******+**+       }}      ",
+    "      {{      +*********        }}      ",
+    "      {{       +*+****+**+      }}      ",
+    "      {{       ++*+******       }}      ",
+    "      {{{{       ***+         }}}}      ",
+    "       {{{{       +*         }}}}       ",
+    "                _+**>                   ",
+    "                  **                    ",
 )
 # Logo colors, as (r, g, b), sampled from the source artwork (SylvanLogo).
-# The braces are CSS "green" and the foliage CSS "darkgreen"; the source uses
-# exactly these two and nothing else. Change these two lines to restyle.
+# The braces keep the source artwork's CSS "green"; the foliage uses a brighter
+# green so the tree reads against a dark terminal, where the original darkgreen
+# went muddy. Change these two lines to restyle.
 BRACE_RGB = (0, 128, 0)
-TREE_RGB = (0, 100, 0)
+TREE_RGB = (71, 180, 19)
 # Glyphs that only ever appear in the tree. A run containing any of these is
 # foliage; anything else is brace. Classifying by run rather than by character
-# matters because the two share characters — the art has a stray "]" inside the
-# foliage and a "-" attached to a brace.
-TREE_GLYPHS = frozenset("~+><_")
+# keeps a stray "]" left in the foliage tinted as foliage, and stays correct if
+# the art is ever redrawn with glyphs the two elements share.
+TREE_GLYPHS = frozenset("*+><_")
 # A run is non-space, allowing single interior spaces; two or more spaces end it.
 LOGO_RUN = re.compile(r"\S+(?: \S+)*")
 ANSI_RESET = "\033[0m"
