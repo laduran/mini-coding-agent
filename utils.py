@@ -26,10 +26,11 @@ WELCOME_ART = (
     "                _+~~>                   ",
     "                  ~~                    ",
 )
-# Logo colors, as (r, g, b). The braces are the lighter green, the tree the
-# darker one — change these two lines to restyle the logo.
-BRACE_RGB = (129, 199, 132)
-TREE_RGB = (46, 125, 50)
+# Logo colors, as (r, g, b), sampled from the source artwork (SylvanLogo).
+# The braces are CSS "green" and the foliage CSS "darkgreen"; the source uses
+# exactly these two and nothing else. Change these two lines to restyle.
+BRACE_RGB = (0, 128, 0)
+TREE_RGB = (0, 100, 0)
 # Glyphs that only ever appear in the tree. A run containing any of these is
 # foliage; anything else is brace. Classifying by run rather than by character
 # matters because the two share characters — the art has a stray "]" inside the
