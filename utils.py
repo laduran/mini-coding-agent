@@ -95,22 +95,27 @@ def enable_windows_ansi():
         return
 
 
-def colorize_logo(line, enabled=None):
-    """Color the logo's braces and foliage differently.
+def paint(text, rgb, enabled=None):
+    """Wrap text in a 24-bit ANSI color, or return it unchanged if color is off.
 
-    Applied *after* the line has been padded and centred: ANSI codes are zero
-    width on screen but count toward len(), so coloring earlier would skew every
-    width calculation and bend the box out of shape.
+    Always applied *after* the text has been padded and centred: ANSI codes are
+    zero width on screen but count toward len(), so coloring earlier would skew
+    every width calculation and bend the box out of shape.
     """
     if not (color_enabled() if enabled is None else enabled):
+        return text
+    red, green, blue = rgb
+    return f"\033[38;2;{red};{green};{blue}m{text}{ANSI_RESET}"
+
+
+def colorize_logo(line, enabled=None):
+    """Color the logo's braces and foliage differently."""
+    if not (color_enabled() if enabled is None else enabled):
         return line
-
-    def paint(match):
-        run = match.group()
-        red, green, blue = TREE_RGB if TREE_GLYPHS & set(run) else BRACE_RGB
-        return f"\033[38;2;{red};{green};{blue}m{run}{ANSI_RESET}"
-
-    return LOGO_RUN.sub(paint, line)
+    return LOGO_RUN.sub(
+        lambda m: paint(m.group(), TREE_RGB if TREE_GLYPHS & set(m.group()) else BRACE_RGB, True),
+        line,
+    )
 
 
 def now():
