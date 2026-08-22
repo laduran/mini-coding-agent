@@ -1,15 +1,46 @@
+import os
+import re
+import sys
 from datetime import datetime, timezone
 
 DOC_NAMES = ("AGENTS.md", "README.md", "pyproject.toml", "package.json")
 HELP_TEXT = "/help, /memory, /session, /reset, /exit"
 WELCOME_ART = (
-    "/\\     /\\\\",
-    "{  `---'  }",
-    "{  O   O  }",
-    "~~>  V  <~~",
-    "\\\\  \\|/  /",
-    "`-----'__",
+    "                 _*                     ",
+    "               *******                  ",
+    "       {{{{    *******++     }}}}       ",
+    "      {{{{     ********       }}}}      ",
+    "      {{     *+********+        }}      ",
+    "      {{      *+**********      }}      ",
+    "      {{     ***********]       }}      ",
+    "      {{      +***********      }}      ",
+    "     {{{      ************      }}}     ",
+    "   {{{       **********   *       }}}   ",
+    "     {{{       ******+**        }}}     ",
+    "      {{      *******+**+       }}      ",
+    "      {{      +*********        }}      ",
+    "      {{       +*+****+**+      }}      ",
+    "      {{       ++*+******       }}      ",
+    "      {{{{       ***+         }}}}      ",
+    "       {{{{       +*         }}}}       ",
+    "                _+**>                   ",
+    "                  **                    ",
 )
+# Logo colors, as (r, g, b), sampled from the source artwork (SylvanLogo).
+# The braces keep the source artwork's CSS "green"; the foliage uses a brighter
+# green so the tree reads against a dark terminal, where the original darkgreen
+# went muddy. Change these two lines to restyle.
+BRACE_RGB = (0, 128, 0)
+TREE_RGB = (71, 180, 19)
+# Glyphs that only ever appear in the tree. A run containing any of these is
+# foliage; anything else is brace. Classifying by run rather than by character
+# keeps a stray "]" left in the foliage tinted as foliage, and stays correct if
+# the art is ever redrawn with glyphs the two elements share.
+TREE_GLYPHS = frozenset("*+><_")
+# A run is non-space, allowing single interior spaces; two or more spaces end it.
+LOGO_RUN = re.compile(r"\S+(?: \S+)*")
+ANSI_RESET = "\033[0m"
+
 HELP_DETAILS = (
     "Commands:\n"
     "/help    Show this help message.\n"
@@ -28,6 +59,63 @@ MAX_FILE_VIEWS = 3
 MAX_FILE_VIEW_CHARS = 8000
 MAX_FILE_VIEWS_TOTAL = 12000
 IGNORED_PATH_NAMES = {".git", ".mini-coding-agent", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv", "venv"}
+
+
+def color_enabled(stream=None):
+    """True when it is safe to emit ANSI color.
+
+    Off when output is redirected or piped, so escape codes never end up in a
+    captured transcript. That also keeps the tests on the plain-text path, which
+    is what lets the box-geometry assertions keep measuring real widths.
+    """
+    stream = sys.stdout if stream is None else stream
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+        return False
+    return bool(getattr(stream, "isatty", None)) and stream.isatty()
+
+
+def enable_windows_ansi():
+    """Turn on virtual-terminal processing so ANSI works in legacy consoles.
+
+    Windows Terminal handles this already; older conhost does not, and without
+    it the escape codes print as literal garbage. No-op everywhere else.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        # -11 = STD_OUTPUT_HANDLE, 0x4 = ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x4)
+    except Exception:  # noqa: BLE001 - color is cosmetic; never break startup over it
+        return
+
+
+def paint(text, rgb, enabled=None):
+    """Wrap text in a 24-bit ANSI color, or return it unchanged if color is off.
+
+    Always applied *after* the text has been padded and centred: ANSI codes are
+    zero width on screen but count toward len(), so coloring earlier would skew
+    every width calculation and bend the box out of shape.
+    """
+    if not (color_enabled() if enabled is None else enabled):
+        return text
+    red, green, blue = rgb
+    return f"\033[38;2;{red};{green};{blue}m{text}{ANSI_RESET}"
+
+
+def colorize_logo(line, enabled=None):
+    """Color the logo's braces and foliage differently."""
+    if not (color_enabled() if enabled is None else enabled):
+        return line
+    return LOGO_RUN.sub(
+        lambda m: paint(m.group(), TREE_RGB if TREE_GLYPHS & set(m.group()) else BRACE_RGB, True),
+        line,
+    )
 
 
 def now():

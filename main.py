@@ -13,7 +13,15 @@ except ImportError:
 from mini_agent import MiniAgent
 from ollama_model_client import OllamaModelClient
 from session_store import SessionStore
-from utils import HELP_DETAILS, WELCOME_ART, middle
+from utils import (
+    HELP_DETAILS,
+    TREE_RGB,
+    WELCOME_ART,
+    colorize_logo,
+    enable_windows_ansi,
+    middle,
+    paint,
+)
 from workspace_context import WorkspaceContext
 
 
@@ -24,16 +32,25 @@ def build_welcome(agent, model, host):
     left_width = (inner - gap) // 2
     right_width = inner - gap - left_width
 
+    # The frame is drawn in the tree's green. Only the border characters are
+    # painted, so the width math above still sees plain text.
+    bar = paint("|", TREE_RGB)
+
     def row(text):
         body = middle(text, width - 4)
-        return f"| {body.ljust(width - 4)} |"
+        return f"{bar} {body.ljust(width - 4)} {bar}"
 
     def divider(char="-"):
-        return "+" + char * (width - 2) + "+"
+        return paint("+" + char * (width - 2) + "+", TREE_RGB)
 
     def center(text):
         body = middle(text, inner)
-        return f"| {body.center(inner)} |"
+        return f"{bar} {body.center(inner)} {bar}"
+
+    def art_row(text):
+        # Colorize after centring so the ANSI codes never reach the width math.
+        body = middle(text, inner)
+        return f"{bar} {colorize_logo(body.center(inner))} {bar}"
 
     def cell(label, value, size):
         body = middle(f"{label:<9} {value}", size)
@@ -42,10 +59,10 @@ def build_welcome(agent, model, host):
     def pair(left_label, left_value, right_label, right_value):
         left = cell(left_label, left_value, left_width)
         right = cell(right_label, right_value, right_width)
-        return f"| {left}{' ' * gap}{right} |"
+        return f"{bar} {left}{' ' * gap}{right} {bar}"
 
     line = divider("=")
-    rows = [center(text) for text in WELCOME_ART]
+    rows = [art_row(text) for text in WELCOME_ART]
     rows.extend(
         [
             center("MINI CODING AGENT"),
@@ -135,6 +152,7 @@ def build_arg_parser():
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+    enable_windows_ansi()
     agent = build_agent(args)
 
     print(build_welcome(agent, model=args.model, host=args.host))
